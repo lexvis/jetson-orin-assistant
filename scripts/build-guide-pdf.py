@@ -269,7 +269,7 @@ code([
 ])
 h2("Swap on NVMe (OOM safety net)")
 code([
-    "./scripts/02-swap.sh 12     # creates /mnt/nvme/swapfile, swappiness=10",
+    "./scripts/02-swap.sh 12     # creates /swapfile on the NVMe, swappiness=10",
 ])
 bullets([
     "Static IP or DHCP reservation for a stable headless server.",
@@ -285,7 +285,7 @@ code([
     "bash jetson-containers/install.sh",
 ])
 callout("Tip",
-        "Keep all model weights and Docker data on the NVMe (e.g. /mnt/nvme). Pin image tags in versions.env.",
+        "After the rootOnNVMe migration the NVMe is the root filesystem (/) - the only drive - so model weights (/opt/models) and Docker data (/var/lib/docker) already live on it. Just don't fill it up. Pin image tags in versions.env.",
         SECBG)
 
 # ================= 6. LLAMA.CPP =================
@@ -295,7 +295,7 @@ h2("Model choice (balance)")
 bullets([
     "Gemma 3 4B (Q4_K_M) + mmproj, or Qwen2.5-VL 3B (Q4) + mmproj.",
     "Download GGUF from a trusted source; verify checksums; pin the filename.",
-    "Store under /mnt/nvme/models.",
+    "Store under /opt/models (on the NVMe root; no separate /mnt/nvme exists).",
 ])
 h2("Run (see compose/docker-compose.yml)")
 code([

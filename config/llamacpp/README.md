@@ -4,7 +4,9 @@ OpenAI-compatible inference server for the **local** model (privacy/offline
 fallback; cloud Opus via Copilot handles heavy work — see `config/openclaw`).
 
 ## Model files (on NVMe, not committed)
-Place GGUF weights under `/mnt/nvme/models/`. For a multimodal (vision) model
+After the rootOnNVMe migration the NVMe **is** the root filesystem (`/`), so there
+is no separate `/mnt/nvme`. Place GGUF weights under `/opt/models/` (create it with
+`sudo mkdir -p /opt/models`). For a multimodal (vision) model
 you need both the model GGUF **and** its matching `--mmproj` projector:
 
 - Balance pick: **Gemma 3 4B** Q4_K_M (+ mmproj) or **Qwen2.5-VL 3B** Q4 (+ mmproj).

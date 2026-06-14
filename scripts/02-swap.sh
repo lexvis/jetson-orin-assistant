@@ -2,7 +2,9 @@
 # 02-swap.sh — create swap on the NVMe as an OOM safety net for the 8GB Jetson.
 set -euo pipefail
 
-SWAPFILE=/mnt/nvme/swapfile
+# After rootOnNVMe migration the NVMe is the root filesystem (/), so a plain
+# /swapfile already lives on the SSD. There is no separate /mnt/nvme.
+SWAPFILE=/swapfile
 SIZE_GB="${1:-12}"   # default 12GB; pass an arg to override
 
 if [ -f "$SWAPFILE" ]; then
