@@ -1,0 +1,51 @@
+// OpenClaw configuration (starter). Docs: https://docs.openclaw.ai
+// Place at the OpenClaw config path on the Jetson. Secrets come from .env, not here.
+{
+  agents: {
+    defaults: {
+      // --- Model preference ---
+      // Primary = latest Claude Opus via GitHub Copilot (cloud, offloads the Jetson).
+      // Fallback = local llama.cpp model (offline / private).
+      // Confirm exact ids with: openclaw models list
+      model: {
+        primary: "github-copilot/claude-opus-4.8",
+        fallbacks: ["llamacpp/gemma-3-4b"],
+      },
+      models: {
+        // Opt the Copilot model into the Copilot SDK harness runtime.
+        // Requires: openclaw plugins install @openclaw/copilot  (verify linux-arm64 binary)
+        "github-copilot/claude-opus-4.8": { agentRuntime: { id: "copilot" } },
+
+        // Local model served by llama-server (OpenAI-compatible) on :8080.
+        "llamacpp/gemma-3-4b": {},
+
+        // Friendly alias for your preferred default.
+        aliases: { "mijn-default": "github-copilot/claude-opus-4.8" },
+      },
+
+      // --- Security: sandbox non-main sessions (Docker backend) ---
+      // Default sandbox DENIES browser/cron/nodes/gateway; allows bash/read/write/edit.
+      sandbox: { mode: "non-main" },
+    },
+  },
+
+  // --- Channels ---
+  // WhatsApp via official Cloud API. Webhook is hosted on the VPS and relayed
+  // over WireGuard so the Jetson opens no inbound ports.
+  channels: {
+    whatsapp: {
+      // dmPolicy "pairing": unknown senders must be approved with
+      //   openclaw pairing approve whatsapp <code>
+      dmPolicy: "pairing",
+      allowFrom: [],          // add your own number(s) after pairing
+    },
+  },
+
+  // --- Local model provider (llama.cpp OpenAI-compatible endpoint) ---
+  providers: {
+    llamacpp: {
+      baseUrl: "http://127.0.0.1:8080/v1",
+      apiKey: "sk-no-key-required",
+    },
+  },
+}

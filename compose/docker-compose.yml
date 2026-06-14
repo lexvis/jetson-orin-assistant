@@ -1,0 +1,67 @@
+# Docker Compose for the Jetson assistant stack.
+# Tags come from ../versions.env — keep them pinned.
+# Requires the NVIDIA container runtime (JetPack). Models live on the NVMe.
+#
+# Usage:
+#   docker compose --env-file ../versions.env -f docker-compose.yml up -d
+
+services:
+  llamacpp:
+    image: ${LLAMACPP_IMAGE}
+    runtime: nvidia
+    restart: unless-stopped
+    ports:
+      - "8080:8080"            # OpenAI-compatible /v1 endpoint (bind to localhost/WG in prod)
+    volumes:
+      - /mnt/nvme/models:/models
+    command: >
+      llama-server
+      -m /models/gemma-3-4b-it-Q4_K_M.gguf
+      --mmproj /models/gemma-3-4b-mmproj.gguf
+      --host 0.0.0.0 --port 8080
+      -ngl 99 --ctx-size 4096
+    # Multimodal: provide the matching --mmproj for your chosen VLM.
+
+  open-webui:
+    image: ${OPENWEBUI_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    environment:
+      - OPENAI_API_BASE_URL=http://llamacpp:8080/v1
+      - OPENAI_API_KEY=sk-no-key-required
+      - WEBUI_SECRET_KEY=${OPENWEBUI_SECRET_KEY}
+    volumes:
+      - ./data/open-webui:/app/backend/data
+    depends_on:
+      - llamacpp
+
+  wyoming-whisper:
+    image: ${WYOMING_WHISPER_IMAGE}
+    restart: unless-stopped
+    command: --model base --language nl
+    ports:
+      - "10300:10300"
+    volumes:
+      - ./data/whisper:/data
+
+  wyoming-piper:
+    image: ${WYOMING_PIPER_IMAGE}
+    restart: unless-stopped
+    command: --voice nl_NL-mls-medium
+    ports:
+      - "10200:10200"
+    volumes:
+      - ./data/piper:/data
+
+  # OpenClaw runs as the Gateway daemon. Official Docker install:
+  #   https://docs.openclaw.ai/install/docker
+  # Run sandboxed; mount config from ../config/openclaw. Keep it on an isolated
+  # network and give it NO payment/order credentials.
+  # openclaw:
+  #   image: ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ../config/openclaw:/config
+  #     - ./data/openclaw:/root/.openclaw
+  #   env_file: ../.env

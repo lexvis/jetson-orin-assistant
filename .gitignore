@@ -1,0 +1,26 @@
+# Secrets — NEVER commit
+.env
+*.env.local
+**/secrets/**
+*.key
+*.pem
+wireguard/*.conf
+!wireguard/*.example.conf
+
+# Model weights (large; pull separately)
+*.gguf
+*.bin
+*.safetensors
+models/
+
+# Runtime / state
+**/data/**
+**/.openclaw/**
+copilotHome/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
