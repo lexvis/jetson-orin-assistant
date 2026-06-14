@@ -30,9 +30,13 @@ multimodal model behind an OpenAI-compatible endpoint, with an
   (Opus primary). See `versions.env`.
 - **Connectivity:** outbound only. Admin via **WireGuard**; agent via **WhatsApp
   Cloud API** with the webhook on the VPS, relayed over WireGuard.
-- **Security:** OpenClaw runs **sandboxed** (`sandbox.mode: "non-main"`,
-  browser denied by default), **DM pairing** on, **no payment/order credentials**,
-  high-impact actions behind **explicit human approval**.
+- **Security & autonomy:** the assistant is highly autonomous for routine,
+  reversible work and only does an **explicit human check-in for high-impact
+  actions** (payments, orders, messaging third parties, deleting data). OpenClaw
+  runs **sandboxed** (`sandbox.mode: "non-main"`, sandbox egress `network: "none"`);
+  the agent's **browser is enabled but isolated** (separate `openclaw` profile, no
+  saved logins/payments). **DM pairing** on, **no payment/order credentials**, and
+  it must never work around a pending/denied approval. Run `openclaw security audit`.
 
 ## Layout
 | Path | Purpose |
@@ -56,4 +60,5 @@ multimodal model behind an OpenAI-compatible endpoint, with an
 ## Security note
 Never commit secrets. `.env`, `wireguard/*.conf` (real), `*.key`, and model
 weights are gitignored. Review OpenClaw's "Gateway exposure runbook" before any
-remote exposure.
+remote exposure. See [`SECURITY.md`](SECURITY.md) for the full autonomy/approval
+model and the controls borrowed from Microsoft Scout and OWASP/NIST.

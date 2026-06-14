@@ -8,6 +8,7 @@ Outputs:  ../docs/Jetson-Orin-Nano-Assistant-Install-Guide.pdf
 import os
 from datetime import date
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 # ---- text sanitiser: keep core-font (latin-1) safe ----
 _MAP = {
@@ -31,6 +32,15 @@ WARNBG = (255, 244, 229)
 SECBG = (230, 244, 235)
 
 class Guide(FPDF):
+    # Force every multi_cell to return the cursor to the left margin on the next
+    # line. fpdf2 defaults to new_x=RIGHT, which left the X cursor at the right
+    # margin so any following multi_cell (cover title, callout body) started off
+    # the page and rendered clipped on the right edge.
+    def multi_cell(self, *args, **kwargs):
+        kwargs.setdefault("new_x", XPos.LMARGIN)
+        kwargs.setdefault("new_y", YPos.NEXT)
+        return super().multi_cell(*args, **kwargs)
+
     def header(self):
         if self.page_no() == 1:
             return
@@ -355,18 +365,29 @@ code([
 ])
 h2("Security configuration (NOT the defaults)")
 callout("[!] Default = full host access for the main session",
-        "You must override this. Enable sandbox mode for non-main sessions, keep browser/cron denied by default, and require pairing for unknown senders.",
+        "You must override this. Sandbox non-main sessions (Docker), keep sandbox egress off (network: none), require pairing for unknown senders, and never enable tools.elevated (it bypasses the sandbox).",
         WARNBG)
 code([
     "# config/openclaw/config.json5 (excerpt)",
-    "agents.defaults.sandbox = { mode: 'non-main' }   # Docker sandbox",
-    "channels.whatsapp.dmPolicy = 'pairing'           # approve senders explicitly",
-    "# approve a paired sender:",
-    "openclaw pairing approve whatsapp <code>",
+    "agents.defaults.sandbox = {",
+    "  mode: 'non-main', backend: 'docker', scope: 'session',",
+    "  docker: { network: 'none' },     # no egress for sandboxed shell/code",
+    "}",
+    "tools = { profile: 'coding', alsoAllow: ['browser'] }  # capable + browser on",
+    "browser = { enabled: true }        # isolated 'openclaw' profile (see below)",
+    "logging = { redactSensitive: 'tools' }",
+    "channels.whatsapp.dmPolicy = 'pairing'",
+    "openclaw pairing approve whatsapp <code>   # approve a sender",
+])
+h2("The browser is enabled - but isolated")
+bullets([
+    "The agent uses a separate 'openclaw' browser profile, NOT your personal browser.",
+    "That profile has no logged-in webshops and no saved payment methods, so the agent can browse and verify freely but cannot complete a purchase with your cards.",
+    "Do not switch the agent to the 'user' profile (your real signed-in Chrome).",
 ])
 bullets([
-    "Give OpenClaw NO payment/order credentials; browser profile without logged-in webshops.",
-    "High-impact actions behind explicit human approval (OpenClaw approvals).",
+    "Give OpenClaw NO payment/order credentials (it can draft an order; you execute it).",
+    "Run 'openclaw security audit' (add --deep / --fix) after any config or exposure change.",
     "Read the official 'Gateway exposure runbook' before any remote exposure.",
     "ARM64: Node + Playwright/Chromium work; watch for x86-assuming skills.",
 ])
@@ -401,23 +422,40 @@ bullets([
 
 # ================= 13. SECURITY =================
 h1("13. Security Model & Approval Gates")
-h2("Capability tiers")
+body("Principle: maximise useful autonomy, minimise blast radius. The assistant should resolve the routine 95% on its own and stop only for the consequential 5%. It must do a genuine check-in for sensitive actions - and never try to force, retry around, or social-engineer its way past a denied/pending approval.")
+h2("Autonomy tiers")
 bullets([
-    "Read-only / informational: may run automatically.",
-    "Reversible actions: notify the user.",
-    "High-consequence / irreversible (orders, payments, external messages): require explicit human approval.",
+    "Tier A - Autonomous (no prompt): search, browse (isolated profile), summarise, draft replies, run code in the sandbox, install Python/npm packages in the sandbox, read Home Assistant sensors, manage its own workspace files.",
+    "Tier B - Act + notify: reversible local changes and non-critical home control (e.g. lights); the agent acts and tells you what it did.",
+    "Tier C - Approval required (hard stop): spending money, orders/purchases/payments, messaging or emailing third parties on your behalf, posting publicly, deleting data irreversibly, changing credentials/security, controlling critical devices, or running outside the sandbox.",
+])
+h2("Why a denied approval actually holds")
+bullets([
+    "Least privilege: the agent holds NO payment/order credentials, so a Tier C action cannot physically complete without you - the gate is structural, not just a prompt instruction.",
+    "Isolated browser profile: no saved cards or logged-in webshops, so 'just check out on the site' is not possible.",
+    "Sandbox with no egress (network: none) for shell/code; tools.elevated stays off.",
+    "The agent is instructed to surface the blocker and wait, not to brute-force or seek a workaround.",
 ])
 h2("Controls in this build")
 bullets([
     "Outbound-only networking; no inbound router ports (WireGuard + VPS relay).",
-    "OpenClaw sandboxed (Docker), browser/cron denied by default, DM pairing on.",
-    "No payment/order credentials available to the agent (it can only draft; you execute).",
-    "Secrets in .env (gitignored); never committed. WireGuard private keys generated on-device.",
-    "Audit: keep OpenClaw logs; run 'openclaw doctor' to surface risky policies.",
+    "OpenClaw sandboxed (Docker), sandbox egress network: none, DM pairing on.",
+    "Browser enabled but isolated ('openclaw' profile) - capable yet credential-free.",
+    "No payment/order credentials available to the agent (it drafts; you execute).",
+    "Secrets in .env (gitignored); WireGuard private keys generated on-device.",
+    "Audit: run 'openclaw security audit' (--deep/--fix) and 'openclaw doctor'; keep redacted logs (logging.redactSensitive: 'tools').",
 ])
 callout("Golden rule",
-        "Agents must never place orders or take consequential actions without explicit prior approval. Architecture enforces this via least privilege (no credentials) plus an approval gate, not just prompt instructions.",
+        "Agents must never place orders or take consequential actions without explicit prior approval - and must never try to force or bypass that approval. Enforced by least privilege (no credentials) + sandbox + isolated browser, not by prompt instructions alone.",
         SECBG)
+h2("Borrowed from Microsoft Scout & recognised frameworks")
+bullets([
+    "Scout identity/SSO -> personal analog: strict DM pairing + allowlists (only you can drive the bot); one trusted operator per gateway.",
+    "Scout policy/governance -> tool allowlists + autonomy tiers + 'openclaw security audit --fix' (flips open policies to allowlists).",
+    "Scout audit/observability -> redacted tool logs + periodic audit/doctor runs.",
+    "OWASP LLM/Agentic Top 10 -> mitigate excessive agency (least privilege + approval) and prompt injection (treat inbound DMs AND web page content as untrusted).",
+    "NIST AI RMF + least-privilege/egress control -> sandbox network: none, no inbound ports, deliberate version pinning.",
+])
 
 # ================= 14. VERIFY =================
 h1("14. Verification & Benchmarking")

@@ -23,10 +23,58 @@
         aliases: { "mijn-default": "github-copilot/claude-opus-4.8" },
       },
 
-      // --- Security: sandbox non-main sessions (Docker backend) ---
-      // Default sandbox DENIES browser/cron/nodes/gateway; allows bash/read/write/edit.
-      sandbox: { mode: "non-main" },
+      // --- Autonomy + sandbox -------------------------------------------------
+      // Design goal: the assistant is HIGHLY autonomous for routine, reversible
+      // work (search, browse in the isolated profile, draft replies, run code in
+      // the sandbox, install Python/npm packages in the sandbox, query Home
+      // Assistant). It should resolve tasks itself instead of bouncing every step
+      // back to you. It pauses for an explicit human check-in ONLY on high-impact
+      // or irreversible actions (payments, orders, messaging third parties on your
+      // behalf, deleting data, changing credentials/security). It must respect
+      // that gate - never try to work around or "force" a pending/denied approval.
+      //
+      // mode "non-main": non-main sessions run in a Docker sandbox.
+      // network "none": sandboxed shell/code has NO egress by default (the
+      // isolated browser uses its own network). GPU stays off the sandbox unless
+      // a tool explicitly needs CUDA.
+      sandbox: {
+        mode: "non-main",
+        backend: "docker",
+        scope: "session",
+        docker: {
+          network: "none",
+          // gpus: "all",   // uncomment only if a sandboxed tool needs CUDA
+        },
+      },
     },
+  },
+
+  // --- Tools & autonomy ------------------------------------------------------
+  // The "coding" profile gives a capable default tool loop (read/write/edit/exec/
+  // web_search/web_fetch) so the agent can actually finish tasks on its own. The
+  // browser tool is NOT in that profile, so we add it explicitly.
+  // NOTE: do not enable tools.elevated - it bypasses the sandbox. Leave it unset.
+  tools: {
+    profile: "coding",
+    alsoAllow: ["browser"],
+  },
+
+  // --- Browser (enabled, but isolated) --------------------------------------
+  // The agent's browser is a SEPARATE "openclaw" profile: it does NOT touch your
+  // personal browser and has NO logged-in webshops or saved payment methods. That
+  // isolation is the real safety boundary - the agent can browse and verify
+  // freely, but cannot complete a purchase with your saved cards. The isolated
+  // "openclaw" profile is the default for agent tool calls; do NOT switch the
+  // agent to the "user" profile (your real signed-in Chrome). An explicit root
+  // browser block activates the bundled browser plugin.
+  browser: {
+    enabled: true,
+  },
+
+  // --- Logging ---------------------------------------------------------------
+  // Redact secrets that pass through tool calls so they never land in the logs.
+  logging: {
+    redactSensitive: "tools",
   },
 
   // --- Channels ---
