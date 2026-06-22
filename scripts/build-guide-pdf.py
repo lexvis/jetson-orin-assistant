@@ -160,7 +160,7 @@ pdf.set_font("Helvetica", "B", 11); pdf.set_text_color(*INK)
 pdf.multi_cell(W, 6, s("Key decisions captured in this build"))
 pdf.set_font("Helvetica", "", 10.5); pdf.set_text_color(*INK)
 for it in [
-    "Boot: SD card as throwaway bootstrap media -> clone rootfs to NVMe -> run from NVMe (no x86 Linux host).",
+    "Install: JetPack 7.2 'Jetson ISO' on a USB stick installs Jetson Linux directly onto the NVMe (no SD clone, no x86 Linux host).",
     "Local runtime: llama.cpp llama-server (OpenAI-compatible), 3-4B Q4 multimodal model.",
     "Optional cloud offload: GitHub Copilot provider, latest Claude Opus as preferred model.",
     "Agent harness: OpenClaw (sandboxed), WhatsApp Cloud API channel, admin via WireGuard.",
@@ -208,11 +208,12 @@ bullets([
 h1("2. Hardware Checklist & Memory Budget")
 h2("Hardware")
 bullets([
-    "Jetson Orin Nano 8GB Developer Kit (Super-capable; JetPack 6.2).",
+    "Jetson Orin Nano 8GB Developer Kit (Super-capable; JetPack 7.2 / L4T r39.2).",
     "NVMe M.2 SSD 500GB (PCIe Gen3) installed in the M.2 Key-M slot.",
-    "microSD card (>=64GB) used only for bootstrap.",
+    "USB stick (>=16GB) for the one-time JetPack installer (throwaway boot media).",
+    "DisplayPort monitor + USB keyboard for the one-time install (no video over USB-C); headless via SSH afterwards.",
     "Active cooling (fan) - required for sustained inference.",
-    "12V DC barrel power supply that can sustain MAXN SUPER (do not rely on weak USB-C PD).",
+    "Included 19V power supply (barrel jack); MAXN SUPER needs the full supply - don't rely on weak USB-C PD.",
     "Ethernet (recommended) for a stable headless server.",
 ])
 h2("Memory budget (8GB unified - plan carefully)")
@@ -233,23 +234,25 @@ callout("[!] 8GB is the hard constraint",
         "Everything active at once exceeds 8GB. Use a 3-4B local model (not 7B), run Chromium on-demand only, keep 8-16GB swap on NVMe, and prefer the cloud (Copilot) model for heavy work. Serialize peaks (voice OR browser-agent, not both).",
         WARNBG)
 
-# ================= 3. BOOTSTRAP =================
-h1("3. Phase 1 - Bootstrap to NVMe")
-body("The Jetson boots via a Tegra bootloader in QSPI flash on the module, so Windows imaging tools cannot make an SSD bootable on their own. Use the SD card as throwaway bootstrap media, then clone the OS to the NVMe and remove the SD. No x86 Linux host required.")
-h2("Steps")
-body("1) Flash the JetPack 6.2 SD image on Windows with balenaEtcher. 2) Boot once from SD and finish first-boot setup. 3) Update firmware (QSPI) and enable NVMe boot from the Jetson itself:")
-code([
-    "sudo apt update && sudo apt full-upgrade -y   # updates nvidia-l4t-bootloader",
-    "sudo reboot",
+# ================= 3. INSTALL JETPACK =================
+h1("3. Phase 1 - Install JetPack to the NVMe (USB-ISO)")
+body("Since JetPack 7.2 (L4T r39.2, mid-2026), NVIDIA ships a 'Jetson ISO' installer that you write to a USB stick. You boot the Jetson once from that USB stick and the installer updates the QSPI firmware and installs Jetson Linux DIRECTLY onto the NVMe SSD - no SD card, no rootfs clone, no x86 Linux host. The USB stick is throwaway boot media (like a DVD); remove it afterwards.")
+h2("On Windows: write the ISO to a USB stick")
+body("1) Download the Jetson ISO from NVIDIA (developer.nvidia.com -> JetPack downloads -> Jetson ISO r39.2). 2) Write it to a >=16GB USB stick with balenaEtcher (Flash from file -> Select target = the USB stick -> Flash). Verify the download is complete (size / SHA256). The firmware update is baked into the ISO - no internet needed for it.")
+callout("[!] No video over USB-C",
+        "The Orin Nano Developer Kit outputs display only over its DisplayPort connector (no HDMI port; USB-C does NOT carry video). The UEFI firmware prompt cannot be driven over USB-C, so you need a DisplayPort monitor + USB keyboard (or a USB-to-TTL serial cable) for the one-time install. Afterwards the device runs fully headless via SSH.",
+        WARNBG)
+h2("On the Jetson: boot the USB and install")
+bullets([
+    "Attach a DisplayPort monitor + USB keyboard, Ethernet, the NVMe, and the USB stick, then connect the included 19V power supply.",
+    "Press Esc at the NVIDIA splash -> Boot Manager -> select the USB stick.",
+    "Press Y within 30 seconds to accept the QSPI firmware capsule update (the most-missed step; the install fails later if skipped). It runs in two passes with reboots.",
+    "At the GRUB menu choose 'Install Jetson ISO r39.2', select the NVMe SSD as the target (not the USB, not a microSD), and confirm (this erases the NVMe).",
+    "Reboot when prompted and remove the USB stick - the system now runs entirely from the NVMe.",
 ])
-body("4) Clone rootfs SD -> NVMe with the JetsonHacks scripts (run on the Jetson):")
-code([
-    "git clone https://github.com/jetsonhacks/rootOnNVMe.git",
-    "cd rootOnNVMe && ./copy-rootfs-ssd.sh && ./setup-service.sh",
-])
-body("5) Set NVMe first in the UEFI boot order if needed. 6) Shut down, remove the SD, and boot - the system now runs entirely from the NVMe.")
+body("On first boot from the NVMe, complete the Ubuntu setup (EULA, language, network, create your user + hostname), then set the power mode to MAXN SUPER. SSH (openssh-server) is enabled by default on L4T, so the device is reachable over the network immediately after this step.")
 callout("Note",
-        "Dev kits that shipped with JetPack 5.x firmware need the apt firmware update before a JP6 SD image / NVMe boot works. The only pure-NVMe flash without a clone step is NVIDIA SDK Manager, which requires an x86 Linux host - intentionally avoided here.",
+        "If the firmware is older than 36.x, the installer's capsule update brings it current first. If your dev kit shipped with factory firmware too old for JetPack 7, run NVIDIA's 'JetPack 6.x update path' once, then retry the JP7 installer.",
         SECBG)
 
 # ================= 4. SYSTEM CONFIG =================
@@ -285,7 +288,7 @@ code([
     "bash jetson-containers/install.sh",
 ])
 callout("Tip",
-        "After the rootOnNVMe migration the NVMe is the root filesystem (/) - the only drive - so model weights (/opt/models) and Docker data (/var/lib/docker) already live on it. Just don't fill it up. Pin image tags in versions.env.",
+        "After the JetPack install the NVMe is the root filesystem (/) - the only drive - so model weights (/opt/models) and Docker data (/var/lib/docker) already live on it. Just don't fill it up. Pin image tags in versions.env.",
         SECBG)
 
 # ================= 6. LLAMA.CPP =================
@@ -485,7 +488,7 @@ bullets([
 h1("16. Troubleshooting")
 kv_table(
     rows=[
-        ["NVMe won't boot after clone", "Update firmware (apt full-upgrade), check UEFI boot order"],
+        ["NVMe won't boot after install", "Re-run the USB installer; ensure you pressed Y for the firmware capsule; check UEFI Boot Manager"],
         ["OOM / killed processes", "Use 3-4B model, add swap, run Chromium on-demand"],
         ["pip install torch broken", "Use Jetson-specific wheels / jetson-containers, not default pip"],
         ["Copilot runtime missing", "openclaw plugins install @openclaw/copilot; openclaw doctor"],
@@ -501,9 +504,9 @@ h1("Appendix - Version Pin Table")
 body("Mirror of versions.env. Update deliberately; verify on-device before bumping.")
 kv_table(
     rows=[
-        ["JetPack", "6.2"],
-        ["L4T", "r36.4"],
-        ["llama.cpp image", "dustynv/llama_cpp:r36.4.0"],
+        ["JetPack", "7.2"],
+        ["L4T", "r39.2"],
+        ["llama.cpp image", "dustynv/llama_cpp:r39.2.0 (verify tag)"],
         ["Open WebUI", "ghcr.io/open-webui/open-webui:main"],
         ["Wyoming Whisper", "rhasspy/wyoming-whisper"],
         ["Wyoming Piper", "rhasspy/wyoming-piper"],

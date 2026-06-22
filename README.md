@@ -23,8 +23,10 @@ multimodal model behind an OpenAI-compatible endpoint, with an
 ```
 
 ## Key decisions
-- **Boot:** SD card as throwaway bootstrap media → clone rootfs to NVMe
-  (`rootOnNVMe`) → remove SD → run fully from NVMe. No Linux host needed.
+- **Install:** JetPack 7.2 "Jetson ISO" written to a USB stick installs Jetson
+  Linux **directly onto the NVMe** (firmware capsule baked in) → remove USB → run
+  fully from NVMe. No SD clone, no x86 Linux host. One-time monitor/keyboard for
+  setup (no video over USB-C); headless via SSH after that.
 - **Runtime:** llama.cpp `llama-server` (not Ollama).
 - **Model:** local 3–4B Q4 (balance) + optional GitHub Copilot cloud offload
   (Opus primary). See `versions.env`.
@@ -43,7 +45,7 @@ multimodal model behind an OpenAI-compatible endpoint, with an
 |------|---------|
 | `docs/` | Installation guide (PDF) |
 | `versions.env` | Pinned versions (edit deliberately) |
-| `scripts/` | System config, swap, NVMe migration notes |
+| `scripts/` | System config, swap, JetPack USB-ISO install notes |
 | `compose/` | Docker Compose for the stack |
 | `config/openclaw/` | OpenClaw config (models, sandbox, channels) |
 | `config/llamacpp/` | Model + server args |

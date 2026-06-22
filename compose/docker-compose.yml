@@ -13,7 +13,7 @@ services:
     ports:
       - "8080:8080"            # OpenAI-compatible /v1 endpoint (bind to localhost/WG in prod)
     volumes:
-      - /opt/models:/models       # on the NVMe (which is / after migration)
+      - /opt/models:/models       # on the NVMe (which is / after the JetPack install)
     command: >
       llama-server
       -m /models/gemma-3-4b-it-Q4_K_M.gguf
