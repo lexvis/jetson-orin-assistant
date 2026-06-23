@@ -1,3 +1,11 @@
+# ============================================================================
+# LEGACY / REFERENCE ONLY — superseded by the NATIVE build.
+# The Jetson now runs llama.cpp (LLM) and whisper.cpp (STT) natively as systemd
+# services (no Docker) — see README.md and the PDF guide. On JetPack 7 the JP6
+# CUDA containers fail/segfault, which is why we moved off Docker. This file is
+# kept only as a record of the earlier container-based plan.
+# ============================================================================
+#
 # Docker Compose for the Jetson assistant stack.
 # Tags come from ../versions.env — keep them pinned.
 # Requires the NVIDIA container runtime (JetPack). Models live on the NVMe.

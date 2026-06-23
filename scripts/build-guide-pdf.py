@@ -4,6 +4,12 @@
 Usage:  python build-guide-pdf.py
 Requires: fpdf2  (pip install fpdf2)
 Outputs:  ../docs/Jetson-Orin-Nano-Assistant-Install-Guide.pdf
+
+Scope (2026-06 rewrite): the Jetson is a GPU INFERENCE NODE only. It serves a
+local LLM (llama.cpp) and STT (whisper.cpp) natively (no Docker), both on the
+GPU, behind simple HTTP endpoints. The agent harness (OpenClaw), TTS (Piper) and
+all orchestration run on a SEPARATE mini-PC - documented here only as integration
+context, not installed on the Jetson.
 """
 import os
 from datetime import date
@@ -46,7 +52,7 @@ class Guide(FPDF):
             return
         self.set_font("Helvetica", "", 8)
         self.set_text_color(*MUTED)
-        self.cell(0, 8, s("Jetson Orin Nano 8GB - Personal Assistant Install Guide"), align="L")
+        self.cell(0, 8, s("Jetson Orin Nano 8GB - Inference Node Install Guide"), align="L")
         self.cell(0, 8, s("p. %d" % self.page_no()), align="R")
         self.ln(10)
 
@@ -148,11 +154,11 @@ pdf.set_text_color(*ACCENT)
 pdf.multi_cell(W, 11, s("NVIDIA Jetson Orin Nano 8GB"))
 pdf.set_font("Helvetica", "B", 17)
 pdf.set_text_color(*INK)
-pdf.multi_cell(W, 9, s("Local Multimodal Personal Assistant"))
+pdf.multi_cell(W, 9, s("Local GPU Inference Node (LLM + Speech-to-Text)"))
 pdf.ln(2)
 pdf.set_font("Helvetica", "", 12)
 pdf.set_text_color(*MUTED)
-pdf.multi_cell(W, 6, s("Installation guide: boot to NVMe, local + cloud models, voice, Home Assistant, and the OpenClaw agent harness - secured, outbound-only, with human-in-the-loop approval."))
+pdf.multi_cell(W, 6, s("Installation guide: boot to NVMe, minimise the OS, build llama.cpp and whisper.cpp natively for CUDA, and serve a local LLM + STT over the network for Home Assistant and a separate mini-PC orchestrator."))
 pdf.ln(8)
 pdf.set_draw_color(*ACCENT); pdf.set_line_width(0.4)
 pdf.line(16, pdf.get_y(), 16 + W, pdf.get_y()); pdf.ln(6)
@@ -160,364 +166,320 @@ pdf.set_font("Helvetica", "B", 11); pdf.set_text_color(*INK)
 pdf.multi_cell(W, 6, s("Key decisions captured in this build"))
 pdf.set_font("Helvetica", "", 10.5); pdf.set_text_color(*INK)
 for it in [
+    "Scope: the Jetson is an INFERENCE NODE only. Host only GPU models that run on the llama.cpp/ggml stack. Everything else lives on a separate mini-PC.",
     "Install: JetPack 7.2 'Jetson ISO' on a USB stick installs Jetson Linux directly onto the NVMe (no SD clone, no x86 Linux host).",
-    "Local runtime: llama.cpp llama-server (OpenAI-compatible), 3-4B Q4 multimodal model.",
-    "Optional cloud offload: GitHub Copilot provider, latest Claude Opus as preferred model.",
-    "Agent harness: OpenClaw (sandboxed), WhatsApp Cloud API channel, admin via WireGuard.",
-    "Security: outbound-only (no inbound ports), DM pairing, no payment credentials, explicit approval for high-impact actions.",
+    "Runtime: NATIVE builds (no Docker) - llama.cpp (LLM) and whisper.cpp (STT), both CUDA sm_87, served as systemd services.",
+    "Models: Qwen3-8B Q4_K_M (text, :8080) and Whisper large-v3-turbo Q5_0 (STT, auto NL/EN, :8081).",
+    "Minimal + efficient: headless multi-user target, non-essential services disabled, MAXN_SUPER persistent with DVFS left on (no 24/7 jetson_clocks).",
+    "Off-Jetson (mini-PC): Piper TTS, the OpenClaw agent harness, browser automation and approval gates.",
 ]:
     x = pdf.get_x(); pdf.cell(5, 5.6, s("-")); pdf.multi_cell(W - 5, 5.6, s(it)); pdf.set_x(x)
 pdf.ln(6)
 pdf.set_font("Helvetica", "I", 9); pdf.set_text_color(*MUTED)
-pdf.multi_cell(W, 5, s("Version %s - generated %s. Pin versions in versions.env; treat this as living documentation." % ("1.0", date.today().isoformat())))
+pdf.multi_cell(W, 5, s("Version %s - generated %s. Pin versions in versions.env; treat this as living documentation." % ("2.0", date.today().isoformat())))
 
 # ================= 1. OVERVIEW =================
 h1("1. Overview & Architecture")
-body("This guide builds an always-on home assistant on a Jetson Orin Nano 8GB with a 500GB NVMe SSD. It serves a frequently-updated multimodal model behind an OpenAI-compatible endpoint and layers the OpenClaw agent harness on top, with strong security defaults.")
-h2("Components")
+body("This guide provisions an always-on GPU inference node on a Jetson Orin Nano 8GB with a 500GB NVMe SSD. The Jetson does ONE job well: serve a local LLM and speech-to-text on the GPU behind simple HTTP endpoints. A separate mini-PC runs the agent harness (OpenClaw), text-to-speech and all orchestration, and calls the Jetson over the LAN. Keeping the Jetson single-purpose is what lets the 8GB box stay lean and reliable.")
+h2("What runs WHERE")
+kv_table(
+    rows=[
+        ["LLM (Qwen3-8B, llama.cpp)", "Jetson GPU", ":8080 /v1"],
+        ["STT (Whisper large-v3-turbo, whisper.cpp)", "Jetson GPU", ":8081 /inference"],
+        ["TTS (Piper)", "mini-PC / HA", "Wyoming"],
+        ["Agent harness (OpenClaw), browser, approvals", "mini-PC", "-"],
+        ["Home Assistant (Assist pipeline)", "HA host", "-"],
+    ],
+    headers=["Component", "Host", "Endpoint"],
+    widths=[96, 46, 36],
+)
+h2("Why only LLM + STT on the Jetson")
 bullets([
-    "llama.cpp (llama-server): local OpenAI-compatible inference for a 3-4B quantized vision model.",
-    "GitHub Copilot provider (optional): cloud models (Claude Opus) to offload the Jetson for heavy reasoning.",
-    "Open WebUI: browser chat interface.",
-    "Wyoming Whisper (STT) + Piper (TTS): voice, integrated with Home Assistant Assist.",
-    "OpenClaw: agentic harness (skills, browser, messaging) running sandboxed.",
-    "WireGuard + VPS: outbound-only admin access and WhatsApp webhook relay.",
-])
+    "Both genuinely benefit from the GPU and both run on the same ggml/llama.cpp ecosystem - one toolchain, one build recipe.",
+    "Piper (TTS) is a light CPU/ONNX task with no real GPU benefit, so it stays off the Jetson to protect the 8GB budget.",
+    "With both models loaded the box already sits at ~6.9/7.3 GB RAM - there is no room for a third large model.",
+]);
 h2("Architecture (data flow)")
 code([
-    "WhatsApp Cloud API --> VPS (webhook + WireGuard server)",
-    "                          |  (relayed over WireGuard tunnel)",
-    "                          v",
-    "  Jetson Orin Nano 8GB (outbound-only; no inbound router ports)",
-    "    - llama-server  :8080  -> OpenAI /v1 (local model)",
-    "    - Open WebUI    :3000",
-    "    - Whisper :10300  Piper :10200  -> Home Assistant Assist",
-    "    - OpenClaw Gateway (sandboxed)",
-    "        primary  = github-copilot/claude-opus-4.8  (cloud)",
-    "        fallback = llamacpp/<local model>          (offline)",
+    "  Home Assistant (Assist)        mini-PC (orchestrator)",
+    "    |  STT audio                    |  chat / tools / approvals",
+    "    v                               v   (OpenClaw, Piper TTS, browser)",
+    "  Jetson Orin Nano 8GB  (LAN, no inbound router ports)",
+    "    - llama-server   :8080  -> OpenAI-compatible /v1   (Qwen3-8B)",
+    "    - whisper-server :8081  -> /inference (STT, auto NL/EN)",
+    "  systemd-managed, GPU-accelerated, auto-start on boot",
 ])
 h2("Design principles")
 bullets([
-    "Outbound-only: the device initiates all connections; no inbound ports on the home network.",
-    "Approval gates: high-impact actions (orders, payments) require explicit human confirmation.",
-    "Least privilege: the agent holds no payment/order credentials; sandboxed tool execution.",
-    "Version pinning: reproducible deployment via versions.env; avoid 'latest' in production.",
+    "Single purpose: the Jetson only does GPU inference; orchestration and side-effects live on the mini-PC.",
+    "Native over containers: build llama.cpp/whisper.cpp directly against the host CUDA - no Docker layer to debug.",
+    "Lean OS: headless, non-essential services off, energy-aware power management (DVFS on).",
+    "Version pinning: reproducible builds via versions.env; avoid 'latest' for anything load-bearing.",
 ])
+callout("Why native, not Docker (JetPack 7 reality)",
+        "On JP7 (L4T r39.2) there is no current prebuilt dusty-nv llama.cpp image (tags stop at r36/JP6). The JP6 CUDA images either fail GPU init or segfault on JP7. Building natively against the host CUDA 13.2 is the reliable path and also reclaims the ~130MB Docker/containerd footprint. A Docker fallback note is in the appendix.",
+        SECBG)
 
 # ================= 2. HARDWARE =================
 h1("2. Hardware Checklist & Memory Budget")
 h2("Hardware")
 bullets([
-    "Jetson Orin Nano 8GB Developer Kit (Super-capable; JetPack 7.2 / L4T r39.2).",
-    "NVMe M.2 SSD 500GB (PCIe Gen3) installed in the M.2 Key-M slot.",
+    "Jetson Orin Nano 8GB Developer Kit (Super-capable; JetPack 7.2 / L4T r39.2, board p3767-0003).",
+    "NVMe M.2 SSD 500GB (PCIe Gen3) installed in the M.2 Key-M slot - becomes the root filesystem.",
     "USB stick (>=16GB) for the one-time JetPack installer (throwaway boot media).",
     "DisplayPort monitor + USB keyboard for the one-time install (no video over USB-C); headless via SSH afterwards.",
     "Active cooling (fan) - required for sustained inference.",
     "Included 19V power supply (barrel jack); MAXN SUPER needs the full supply - don't rely on weak USB-C PD.",
-    "Ethernet (recommended) for a stable headless server.",
+    "Wi-Fi or Ethernet. (This build was provisioned over Wi-Fi; a DHCP reservation for the Jetson IP is recommended.)",
 ])
-h2("Memory budget (8GB unified - plan carefully)")
+h2("Measured memory budget (8GB unified - real numbers from this build)")
 kv_table(
     rows=[
-        ["OS (headless)", "~1.5 GB"],
-        ["Local model (3-4B Q4)", "3-4 GB"],
-        ["Whisper (base)", "0.5-1 GB"],
-        ["Piper (TTS)", "<0.2 GB"],
-        ["Open WebUI", "~0.3 GB"],
-        ["OpenClaw (Node)", "0.3-0.5 GB"],
-        ["Chromium (browser, on-demand)", "0.5-1.5 GB"],
+        ["OS (headless, minimised)", "~0.7 GB"],
+        ["LLM: Qwen3-8B Q4_K_M + KV (c=8192, q8_0)", "~5.2 GB"],
+        ["STT: Whisper large-v3-turbo Q5_0", "~0.55 GB"],
+        ["Both services loaded (measured)", "6.9 / 7.3 GB used"],
+        ["Free with both loaded", "~0.4 GB + 16 GB swap"],
     ],
     headers=["Component", "Approx. RAM"],
     widths=[120, 58],
 )
 callout("[!] 8GB is the hard constraint",
-        "Everything active at once exceeds 8GB. Use a 3-4B local model (not 7B), run Chromium on-demand only, keep 8-16GB swap on NVMe, and prefer the cloud (Copilot) model for heavy work. Serialize peaks (voice OR browser-agent, not both).",
+        "Qwen3-8B Q4 + Whisper turbo + the OS already use ~6.9GB. Keep a 16GB swap file on the NVMe as an OOM safety net, do NOT add a third large model, and keep TTS/agent/browser workloads on the mini-PC. If you need more LLM headroom, lower --ctx-size or use a smaller quant.",
         WARNBG)
 
 # ================= 3. INSTALL JETPACK =================
 h1("3. Phase 1 - Install JetPack to the NVMe (USB-ISO)")
 body("Since JetPack 7.2 (L4T r39.2, mid-2026), NVIDIA ships a 'Jetson ISO' installer that you write to a USB stick. You boot the Jetson once from that USB stick and the installer updates the QSPI firmware and installs Jetson Linux DIRECTLY onto the NVMe SSD - no SD card, no rootfs clone, no x86 Linux host. The USB stick is throwaway boot media (like a DVD); remove it afterwards.")
 h2("On Windows: write the ISO to a USB stick")
-body("1) Download the Jetson ISO from NVIDIA (developer.nvidia.com -> JetPack downloads -> Jetson ISO r39.2). 2) Write it to a >=16GB USB stick with balenaEtcher (Flash from file -> Select target = the USB stick -> Flash). Verify the download is complete (size / SHA256). The firmware update is baked into the ISO - no internet needed for it.")
+body("1) Download the Jetson ISO from NVIDIA (developer.nvidia.com -> JetPack downloads -> Jetson ISO r39.2). 2) Write it to a >=16GB USB stick with balenaEtcher (Flash from file -> Select target = the USB stick -> Flash). Verify the download (size / SHA256). The firmware update is baked into the ISO - no internet needed for it.")
 callout("[!] No video over USB-C",
         "The Orin Nano Developer Kit outputs display only over its DisplayPort connector (no HDMI port; USB-C does NOT carry video). The UEFI firmware prompt cannot be driven over USB-C, so you need a DisplayPort monitor + USB keyboard (or a USB-to-TTL serial cable) for the one-time install. Afterwards the device runs fully headless via SSH.",
         WARNBG)
 h2("On the Jetson: boot the USB and install")
 bullets([
-    "Attach a DisplayPort monitor + USB keyboard, Ethernet, the NVMe, and the USB stick, then connect the included 19V power supply.",
+    "Attach a DisplayPort monitor + USB keyboard, network, the NVMe, and the USB stick, then connect the included 19V power supply.",
     "Press Esc at the NVIDIA splash -> Boot Manager -> select the USB stick.",
     "Press Y within 30 seconds to accept the QSPI firmware capsule update (the most-missed step; the install fails later if skipped). It runs in two passes with reboots.",
     "At the GRUB menu choose 'Install Jetson ISO r39.2', select the NVMe SSD as the target (not the USB, not a microSD), and confirm (this erases the NVMe).",
     "Reboot when prompted and remove the USB stick - the system now runs entirely from the NVMe.",
 ])
-body("On first boot from the NVMe, complete the Ubuntu setup (EULA, language, network, create your user + hostname), then set the power mode to MAXN SUPER. SSH (openssh-server) is enabled by default on L4T, so the device is reachable over the network immediately after this step.")
-callout("Note",
-        "If the firmware is older than 36.x, the installer's capsule update brings it current first. If your dev kit shipped with factory firmware too old for JetPack 7, run NVIDIA's 'JetPack 6.x update path' once, then retry the JP7 installer.",
-        SECBG)
+body("On first boot from the NVMe, complete the Ubuntu setup (EULA, language, network, create your user + hostname). SSH (openssh-server) is enabled by default on L4T, so the device is reachable over the network immediately after this step.")
 
-# ================= 4. SYSTEM CONFIG =================
-h1("4. Phase 2 - System Configuration")
-body("Run on the device after booting from NVMe. See scripts/01-system-config.sh and scripts/02-swap.sh in the repo.")
-h2("Power, cooling, headless")
+# ================= 4. SYSTEM MINIMISATION =================
+h1("4. Phase 2 - System Minimisation & Power")
+body("Run on the device after booting from NVMe. Goal: a lean, headless server that keeps the GPU at a high ceiling without wasting energy. See scripts/01-system-config.sh and scripts/02-swap.sh.")
+h2("Headless + remove the desktop")
 code([
-    "sudo nvpmodel -m 0        # MAXN SUPER",
-    "sudo jetson_clocks        # max clocks",
-    "sudo systemctl set-default multi-user.target   # disable desktop GUI (frees RAM)",
+    "sudo systemctl set-default multi-user.target      # no GUI on boot",
+    "sudo apt purge -y ubuntu-desktop gnome-shell gdm3 yaru-theme-*",
+    "sudo apt autoremove --purge -y && sudo apt clean  # frees several GB",
 ])
-h2("Base packages + Node 24 (for OpenClaw)")
+h2("Power mode: MAXN SUPER, made persistent")
+body("nvpmodel sets a persistent power CEILING; jetson_clocks merely PINS max clocks (disables DVFS) and is deliberately non-persistent. We want the high ceiling but keep DVFS on so the GPU idles down and saves energy.")
 code([
-    "sudo apt install -y build-essential git cmake curl ca-certificates",
-    "curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -",
-    "sudo apt install -y nodejs",
+    "sudo nvpmodel -m 2        # MAXN SUPER (mode 2 on p3767-0003 super conf)",
+    "# Persistence gotcha: symlinking /etc/nvpmodel.conf is reset on boot.",
+    "# Make MAXN_SUPER the board default by editing the board conf itself:",
+    "#   /etc/nvpmodel/nvpmodel_p3767_0003.conf -> set 'DEFAULT 2'",
+    "# (back up the original as .orig first). Do NOT enable a jetson_clocks",
+    "# service - leave DVFS (governor schedutil) on to save energy.",
 ])
+h2("Disable non-essential services")
+body("Audit with 'systemctl list-unit-files --state=enabled' and 'systemd-analyze blame'. On a headless inference node you can safely disable, e.g.: bluetooth, ModemManager, avahi-daemon, cups/lpd, kerneloops, apport, gnome-remote-desktop, switcheroo-control, power-profiles-daemon, accounts-daemon, isc-dhcp-server, dnsmasq, openvpn, sssd, ubuntu-advantage, anacron, fwupd, nvargus-daemon (cameras), udisks2, and the host audio stack (pipewire/wireplumber). Mask snapd and disable cloud-init if unused.")
 h2("Swap on NVMe (OOM safety net)")
 code([
-    "./scripts/02-swap.sh 12     # creates /swapfile on the NVMe, swappiness=10",
+    "sudo ./scripts/02-swap.sh 16     # 16GB /swapfile on the NVMe",
+    "sudo sysctl vm.swappiness=10     # persist in /etc/sysctl.d",
 ])
-bullets([
-    "Static IP or DHCP reservation for a stable headless server.",
-    "SSH is enabled by default on JetPack; manage everything remotely.",
-])
-
-# ================= 5. DOCKER =================
-h1("5. Phase 3 - Docker & jetson-containers")
-body("JetPack ships Docker with the NVIDIA container runtime. Prefer prebuilt Jetson images (dustynv / jetson-containers) over building CUDA from source.")
-code([
-    "docker info | grep -i runtime          # confirm 'nvidia' runtime",
-    "git clone https://github.com/dusty-nv/jetson-containers",
-    "bash jetson-containers/install.sh",
-])
-callout("Tip",
-        "After the JetPack install the NVMe is the root filesystem (/) - the only drive - so model weights (/opt/models) and Docker data (/var/lib/docker) already live on it. Just don't fill it up. Pin image tags in versions.env.",
+callout("Note - 250MB is not reachable, and that's fine",
+        "Even a bare L4T install has an irreducible ~210MB of OS processes plus a kernel/GPU memory carveout. You cannot swap to Alpine/buildroot and keep the GPU - the NVIDIA driver only ships for L4T (Ubuntu 24.04). The realistic floor is what matters: ~0.7GB OS, leaving ~6.5GB for models.",
         SECBG)
 
-# ================= 6. LLAMA.CPP =================
-h1("6. Phase 4 - Local Inference (llama.cpp)")
-body("llama-server provides an OpenAI-compatible /v1 API for the local multimodal model (privacy/offline fallback). For vision you need the model GGUF and its matching --mmproj projector.")
-h2("Model choice (balance)")
-bullets([
-    "Gemma 3 4B (Q4_K_M) + mmproj, or Qwen2.5-VL 3B (Q4) + mmproj.",
-    "Download GGUF from a trusted source; verify checksums; pin the filename.",
-    "Store under /opt/models (on the NVMe root; no separate /mnt/nvme exists).",
-])
-h2("Run (see compose/docker-compose.yml)")
+# ================= 5. BUILD TOOLCHAIN =================
+h1("5. Phase 3 - Native CUDA Build Toolchain")
+body("JetPack 7.2 ships the GPU driver (CUDA 13.2 runtime) but NOT a full CUDA toolkit. Install a MINIMAL build toolchain so we can compile llama.cpp and whisper.cpp against the GPU. Match the toolkit to the driver (CUDA 13.2).")
 code([
-    "llama-server -m /models/gemma-3-4b-it-Q4_K_M.gguf \\",
-    "  --mmproj /models/gemma-3-4b-mmproj.gguf \\",
-    "  --host 0.0.0.0 --port 8080 -ngl 99 --ctx-size 4096",
-    "",
-    "curl http://127.0.0.1:8080/v1/models   # health check",
+    "sudo apt update",
+    "sudo apt install -y cuda-minimal-build-13-2 cuda-nvrtc-dev-13-2 \\",
+    "  libcublas-dev-13-2 cmake g++ libcurl4-openssl-dev ccache git",
+    "export PATH=/usr/local/cuda-13.2/bin:$PATH",
+    "export CUDACXX=/usr/local/cuda-13.2/bin/nvcc",
+    "nvcc --version    # expect release 13.2",
 ])
-
-# ================= 7. OPEN WEBUI =================
-h1("7. Phase 5 - Open WebUI")
-body("A browser chat UI pointed at the local endpoint. Brought up by docker-compose.")
-code([
-    "# environment (compose):",
-    "OPENAI_API_BASE_URL=http://llamacpp:8080/v1",
-    "OPENAI_API_KEY=sk-no-key-required",
-    "# UI on http://<jetson-ip>:3000",
-])
-callout("Security", "Bind UI/endpoint ports to localhost or the WireGuard interface in production - do not expose them to the LAN/internet directly.", WARNBG)
-
-# ================= 8. VOICE =================
-h1("8. Phase 6 - Voice (Whisper + Piper)")
-body("Wyoming services provide speech-to-text and text-to-speech that Home Assistant Assist can discover.")
-code([
-    "wyoming-whisper  --model base  --language nl   # :10300",
-    "wyoming-piper    --voice nl_NL-mls-medium      # :10200",
-])
-bullets([
-    "Load Whisper base/tiny and on-demand to conserve the 8GB budget.",
-    "Both run as containers in docker-compose.yml.",
-])
-
-# ================= 9. HOME ASSISTANT =================
-h1("9. Phase 7 - Home Assistant Assist")
-bullets([
-    "Add Wyoming integrations in HA pointing at <jetson-ip>:10300 (Whisper) and :10200 (Piper).",
-    "Create an Assist pipeline: Whisper (STT) -> Conversation agent (LLM) -> Piper (TTS).",
-    "For the LLM, use the Extended OpenAI Conversation custom integration (HACS) so you can set a custom base_url to http://<jetson-ip>:8080/v1.",
-])
-callout("Approval boundary", "HA voice must not trigger high-impact agent actions (orders/payments) without the OpenClaw approval gate. Keep HA on the LAN/WireGuard network only.", WARNBG)
-
-# ================= 10. CONNECTIVITY =================
-h1("10. Phase 8 - Connectivity (Outbound-only)")
-body("No inbound ports on the home network. The Jetson dials out; interaction returns over the established connections.")
-h2("Admin: WireGuard")
-bullets([
-    "Run a WG client on the Jetson that dials a WG server on your VPS.",
-    "You reach the Jetson over the private tunnel; the home router opens no ports.",
-    "Keep PersistentKeepalive=25 on the Jetson side. See wireguard/ in the repo.",
-])
-h2("Agent channel: WhatsApp Cloud API")
-bullets([
-    "The official Cloud API delivers inbound messages via a webhook (inbound by nature).",
-    "Host the webhook receiver on the VPS, verify the Meta signature, and relay to the Jetson over WireGuard.",
-    "Result: the Jetson / home network opens no inbound ports.",
-])
-
-# ================= 11. OPENCLAW =================
-h1("11. Phase 9 - OpenClaw Agent Harness")
-body("OpenClaw (github.com/openclaw/openclaw, MIT) is a self-hosted personal assistant that bridges chat apps to LLMs with skills, browser control and shell access. Microsoft's 'Scout' is built on OpenClaw. Runtime: Node 24.")
-h2("Install (pin a version; do not blind-curl)")
-code([
-    "npm install -g openclaw@latest",
-    "openclaw onboard --install-daemon     # installs the Gateway systemd service",
-    "openclaw gateway status",
-])
-h2("Security configuration (NOT the defaults)")
-callout("[!] Default = full host access for the main session",
-        "You must override this. Sandbox non-main sessions (Docker), keep sandbox egress off (network: none), require pairing for unknown senders, and never enable tools.elevated (it bypasses the sandbox).",
+callout("[!] cuBLAS is required",
+        "Without libcublas-dev-13-2 the CMake configure fails with 'CUDA::cublas target not found'. The minimal-build metapackage does NOT pull it in - install it explicitly.",
         WARNBG)
-code([
-    "# config/openclaw/config.json5 (excerpt)",
-    "agents.defaults.sandbox = {",
-    "  mode: 'non-main', backend: 'docker', scope: 'session',",
-    "  docker: { network: 'none' },     # no egress for sandboxed shell/code",
-    "}",
-    "tools = { profile: 'coding', alsoAllow: ['browser'] }  # capable + browser on",
-    "browser = { enabled: true }        # isolated 'openclaw' profile (see below)",
-    "logging = { redactSensitive: 'tools' }",
-    "channels.whatsapp.dmPolicy = 'pairing'",
-    "openclaw pairing approve whatsapp <code>   # approve a sender",
-])
-h2("The browser is enabled - but isolated")
-bullets([
-    "The agent uses a separate 'openclaw' browser profile, NOT your personal browser.",
-    "That profile has no logged-in webshops and no saved payment methods, so the agent can browse and verify freely but cannot complete a purchase with your cards.",
-    "Do not switch the agent to the 'user' profile (your real signed-in Chrome).",
-])
-bullets([
-    "Give OpenClaw NO payment/order credentials (it can draft an order; you execute it).",
-    "Run 'openclaw security audit' (add --deep / --fix) after any config or exposure change.",
-    "Read the official 'Gateway exposure runbook' before any remote exposure.",
-    "ARM64: Node + Playwright/Chromium work; watch for x86-assuming skills.",
-])
 
-# ================= 12. COPILOT OFFLOAD =================
-h1("12. Phase 10 - Optional: GitHub Copilot Cloud Offload")
-body("Offload heavy reasoning to cloud models via your GitHub Copilot subscription, keeping the local model as an offline/private fallback. This relaxes the 8GB pressure. OpenClaw supports a github-copilot/* provider natively.")
-h2("Install the Copilot SDK harness plugin")
+# ================= 6. LLM =================
+h1("6. Phase 4 - LLM: build & serve llama.cpp")
+body("Build llama.cpp natively for the Orin's compute capability 8.7 (sm_87), then serve Qwen3-8B (Q4_K_M) over an OpenAI-compatible API on :8080.")
+h2("Build (CUDA sm_87)")
 code([
-    "openclaw plugins install @openclaw/copilot   # ~260MB incl. CLI binary",
-    "# verify the linux-arm64 Copilot CLI binary loads on the Jetson:",
-    "openclaw doctor",
+    "cd /opt && git clone --depth 1 https://github.com/ggml-org/llama.cpp.git",
+    "cd llama.cpp",
+    "cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=87 \\",
+    "  -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build build -j$(nproc) --target llama-server llama-cli",
+    "# The CUDA kernel/flash-attn compile is the long part (~25-35 min).",
 ])
-h2("Preferred model = latest Claude Opus")
+h2("Model")
+bullets([
+    "Qwen3-8B-Q4_K_M.gguf (strong NL/EN; ~4.8GB). Store under /opt/models.",
+    "Download from a trusted GGUF source; verify it loads (llama-cli) and pin the filename in versions.env.",
+])
+h2("Serve as a systemd service")
 code([
-    "// config/openclaw/config.json5 (excerpt)",
-    "agents.defaults.model = {",
-    "  primary: 'github-copilot/claude-opus-4.8',   // confirm id: openclaw models list",
-    "  fallbacks: ['llamacpp/gemma-3-4b']",
-    "}",
-    "models: {",
-    "  'github-copilot/claude-opus-4.8': { agentRuntime: { id: 'copilot' } },",
-    "  aliases: { 'mijn-default': 'github-copilot/claude-opus-4.8' }",
-    "}",
+    "# /etc/systemd/system/llama-server.service (ExecStart, one line):",
+    "ExecStart=/opt/llama.cpp/build/bin/llama-server \\",
+    "  -m /opt/models/Qwen3-8B-Q4_K_M.gguf -ngl 99 -c 8192 -fa on \\",
+    "  --cache-type-k q8_0 --cache-type-v q8_0 \\",
+    "  --host 0.0.0.0 --port 8080 --alias qwen3-8b",
+    "Environment=LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64",
+    "",
+    "sudo systemctl enable --now llama-server",
+    "curl http://127.0.0.1:8080/v1/models       # health check",
 ])
-h2("Choosing your model (three levels)")
-bullets([
-    "Config: agents.defaults.model.primary + fallbacks (persistent default).",
-    "CLI: openclaw models list / set, plus aliases.",
-    "In chat: /model picker (per-session, pinned).",
-])
-
-# ================= 13. SECURITY =================
-h1("13. Security Model & Approval Gates")
-body("Principle: maximise useful autonomy, minimise blast radius. The assistant should resolve the routine 95% on its own and stop only for the consequential 5%. It must do a genuine check-in for sensitive actions - and never try to force, retry around, or social-engineer its way past a denied/pending approval.")
-h2("Autonomy tiers")
-bullets([
-    "Tier A - Autonomous (no prompt): search, browse (isolated profile), summarise, draft replies, run code in the sandbox, install Python/npm packages in the sandbox, read Home Assistant sensors, manage its own workspace files.",
-    "Tier B - Act + notify: reversible local changes and non-critical home control (e.g. lights); the agent acts and tells you what it did.",
-    "Tier C - Approval required (hard stop): spending money, orders/purchases/payments, messaging or emailing third parties on your behalf, posting publicly, deleting data irreversibly, changing credentials/security, controlling critical devices, or running outside the sandbox.",
-])
-h2("Why a denied approval actually holds")
-bullets([
-    "Least privilege: the agent holds NO payment/order credentials, so a Tier C action cannot physically complete without you - the gate is structural, not just a prompt instruction.",
-    "Isolated browser profile: no saved cards or logged-in webshops, so 'just check out on the site' is not possible.",
-    "Sandbox with no egress (network: none) for shell/code; tools.elevated stays off.",
-    "The agent is instructed to surface the blocker and wait, not to brute-force or seek a workaround.",
-])
-h2("Controls in this build")
-bullets([
-    "Outbound-only networking; no inbound router ports (WireGuard + VPS relay).",
-    "OpenClaw sandboxed (Docker), sandbox egress network: none, DM pairing on.",
-    "Browser enabled but isolated ('openclaw' profile) - capable yet credential-free.",
-    "No payment/order credentials available to the agent (it drafts; you execute).",
-    "Secrets in .env (gitignored); WireGuard private keys generated on-device.",
-    "Audit: run 'openclaw security audit' (--deep/--fix) and 'openclaw doctor'; keep redacted logs (logging.redactSensitive: 'tools').",
-])
-callout("Golden rule",
-        "Agents must never place orders or take consequential actions without explicit prior approval - and must never try to force or bypass that approval. Enforced by least privilege (no credentials) + sandbox + isolated browser, not by prompt instructions alone.",
+callout("Expected performance",
+        "On the Orin Nano Super, Qwen3-8B Q4 generates ~7.5-9 tok/s. Token generation is memory-bandwidth bound (~102 GB/s / ~4.8GB model ~= 21 tok/s theoretical ceiling, ~40-60% realised). This is normal and comfortably faster than reading speed for an assistant.",
         SECBG)
-h2("Borrowed from Microsoft Scout & recognised frameworks")
-bullets([
-    "Scout identity/SSO -> personal analog: strict DM pairing + allowlists (only you can drive the bot); one trusted operator per gateway.",
-    "Scout policy/governance -> tool allowlists + autonomy tiers + 'openclaw security audit --fix' (flips open policies to allowlists).",
-    "Scout audit/observability -> redacted tool logs + periodic audit/doctor runs.",
-    "OWASP LLM/Agentic Top 10 -> mitigate excessive agency (least privilege + approval) and prompt injection (treat inbound DMs AND web page content as untrusted).",
-    "NIST AI RMF + least-privilege/egress control -> sandbox network: none, no inbound ports, deliberate version pinning.",
-])
 
-# ================= 14. VERIFY =================
-h1("14. Verification & Benchmarking")
+# ================= 7. STT =================
+h1("7. Phase 5 - Speech-to-Text: build & serve whisper.cpp")
+body("Same ggml ecosystem, same CUDA recipe. whisper.cpp gives GPU-accelerated STT with automatic language detection (NL/EN) on :8081.")
+h2("Build (CUDA sm_87)")
 code([
-    "lsblk                              # root on nvme0n1p1",
-    "nvpmodel -q                        # MAXN SUPER",
-    "curl http://127.0.0.1:8080/v1/models",
-    "docker compose ps                  # all services up",
-    "openclaw gateway status",
-    "# quick local inference latency:",
-    "time curl -s http://127.0.0.1:8080/v1/chat/completions \\",
-    "  -H 'Content-Type: application/json' \\",
-    "  -d '{\"model\":\"local\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'",
+    "cd /opt && git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git",
+    "cd whisper.cpp",
+    "cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=87 \\",
+    "  -DWHISPER_BUILD_SERVER=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build build -j$(nproc) --target whisper-server whisper-cli",
 ])
-
-# ================= 15. MAINTENANCE =================
-h1("15. Maintenance & Updates")
+h2("Model + serve")
+code([
+    "cd /opt/models && curl -L -o ggml-large-v3-turbo-q5_0.bin \\",
+    "  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+    "",
+    "# /etc/systemd/system/whisper-server.service (ExecStart):",
+    "ExecStart=/opt/whisper.cpp/build/bin/whisper-server \\",
+    "  -m /opt/models/ggml-large-v3-turbo-q5_0.bin -l auto -t 4 \\",
+    "  --host 0.0.0.0 --port 8081",
+    "Environment=LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64",
+    "",
+    "sudo systemctl enable --now whisper-server",
+    "# test: curl -F file=@sample.wav -F language=auto \\",
+    "#   -F response_format=json http://127.0.0.1:8081/inference",
+])
 bullets([
-    "Update models: download a new GGUF, update the filename in compose + versions.env, restart llamacpp.",
-    "Update OpenClaw: npm update -g openclaw (then 'openclaw doctor'); pin the version in versions.env.",
-    "Update containers: bump tags in versions.env deliberately, then docker compose pull && up -d.",
-    "Keep the OS current: sudo apt update && sudo apt full-upgrade (includes firmware).",
-    "Commit every change to the deployment repo so the running state is captured.",
+    "large-v3-turbo-q5_0 (~0.55GB) balances accuracy and footprint; it auto-detects NL vs EN.",
+    "The GPU backend (CUDA0) is selected automatically when built with -DGGML_CUDA=ON.",
 ])
 
-# ================= 16. TROUBLESHOOTING =================
-h1("16. Troubleshooting")
+# ================= 8. HOME ASSISTANT =================
+h1("8. Phase 6 - Home Assistant Integration")
+body("Home Assistant orchestrates voice. The Jetson provides the LLM and STT; TTS (Piper) and the agent live elsewhere.")
+h2("Wire it up")
+bullets([
+    "LLM: install 'Extended OpenAI Conversation' (HACS) and set base_url to http://<jetson-ip>:8080/v1 - this becomes the Assist conversation agent.",
+    "STT: bridge the whisper.cpp :8081 HTTP endpoint into HA via a Wyoming/whisper bridge (or run a Wyoming-Whisper satellite that posts to it).",
+    "TTS: run Piper on the mini-PC or as an HA add-on (Wyoming) - NOT on the Jetson.",
+    "Build an Assist pipeline: STT -> conversation agent (Jetson LLM) -> Piper TTS.",
+])
+h2("Microphone & speakers")
+bullets([
+    "Sonos is OUTPUT only: use it as a media_player/announce target for TTS. Its built-in mic (and Google Nest) cannot feed HA Assist - no usable API, and Google-Assistant-on-Sonos was discontinued in 2024.",
+    "For voice INPUT you need a Wyoming satellite: Home Assistant Voice PE (recommended) or an ESP32 'Atom Echo'. The satellite streams mic audio to the pipeline.",
+])
+callout("Approval boundary",
+        "Voice/HA must not trigger high-impact agent actions (orders/payments) directly. Those go through the OpenClaw approval gate on the mini-PC. Keep HA and the Jetson on the LAN/VPN only - do not expose :8080/:8081 to the internet.",
+        WARNBG)
+
+# ================= 9. ORCHESTRATOR =================
+h1("9. The Orchestration Layer (separate mini-PC)")
+body("The agent harness does NOT run on the Jetson. A separate mini-PC runs OpenClaw (skills, browser, messaging), Piper TTS, and personalization, and calls the Jetson's :8080 LLM as one of its model backends. This split keeps side-effects and credentials off the inference node. Full OpenClaw setup and the security/approval model are documented in the repo (config/openclaw, SECURITY.md); the essentials:")
+bullets([
+    "OpenClaw runs sandboxed (non-main sessions, sandbox egress network: none); the browser uses an isolated, credential-free profile.",
+    "High-impact actions (payments, orders, messaging third parties, deleting data) require explicit human approval and the agent must never work around a denied/pending approval.",
+    "Least privilege: the agent holds NO payment/order credentials, so a blocked action cannot complete without you - structural, not just a prompt rule.",
+    "Personalization is done with RAG + a memory layer on the mini-PC (retrieve personal context at query time), NOT by finetuning on the Jetson.",
+])
+callout("Why not finetune on the Jetson",
+        "Finetuning an 8B model (even QLoRA) realistically needs ~12-16GB and heavy training throughput the Orin Nano doesn't have. For 'it knows me', use RAG + memory on the mini-PC. If you truly need weight adaptation, train a LoRA off-box (cloud NVIDIA GPU) and load it with llama-server --lora; the Jetson stays inference-only.",
+        SECBG)
+
+# ================= 10. VERIFY =================
+h1("10. Verification & Benchmarking")
+code([
+    "lsblk                                  # root on nvme0n1p1",
+    "nvpmodel -q                            # MAXN SUPER, persists after reboot",
+    "systemctl is-active llama-server whisper-server   # both 'active'",
+    "systemctl is-enabled llama-server whisper-server  # both 'enabled'",
+    "free -h                                # expect ~6.9/7.3GB with both loaded",
+    "tegrastats --interval 1000             # GR3D_FREQ shows GPU use under load",
+    "",
+    "# LLM round-trip (Dutch prompt):",
+    "curl -s http://127.0.0.1:8080/v1/chat/completions \\",
+    "  -H 'Content-Type: application/json' \\",
+    "  -d '{\"model\":\"qwen3-8b\",\"messages\":[{\"role\":\"user\", \\",
+    "       \"content\":\"Hoofdstad van Nederland?\"}],\"max_tokens\":20}'",
+    "",
+    "# STT round-trip:",
+    "curl -F file=@/opt/whisper.cpp/samples/jfk.wav -F language=auto \\",
+    "  http://127.0.0.1:8081/inference",
+])
+
+# ================= 11. MAINTENANCE =================
+h1("11. Maintenance & Updates")
+bullets([
+    "Update the LLM model: download a new GGUF to /opt/models, update versions.env + the service ExecStart, 'sudo systemctl restart llama-server'.",
+    "Update the engines: 'git pull' in /opt/llama.cpp or /opt/whisper.cpp, rebuild (same cmake recipe), restart the service. Pin the commit in versions.env.",
+    "Keep the OS current: 'sudo apt update && sudo apt full-upgrade' (includes firmware capsules).",
+    "After a CUDA toolkit bump, rebuild both engines and update LD_LIBRARY_PATH in the unit files.",
+    "Commit every change to this deployment repo so the running state stays captured.",
+])
+
+# ================= 12. TROUBLESHOOTING =================
+h1("12. Troubleshooting")
 kv_table(
     rows=[
         ["NVMe won't boot after install", "Re-run the USB installer; ensure you pressed Y for the firmware capsule; check UEFI Boot Manager"],
-        ["OOM / killed processes", "Use 3-4B model, add swap, run Chromium on-demand"],
-        ["pip install torch broken", "Use Jetson-specific wheels / jetson-containers, not default pip"],
-        ["Copilot runtime missing", "openclaw plugins install @openclaw/copilot; openclaw doctor"],
-        ["WhatsApp not receiving", "Check VPS webhook + Meta signature + WireGuard tunnel"],
-        ["Solcast/secrets empty", "Secrets in .env, never committed; check env_file mapping"],
+        ["CMake: 'CUDA::cublas not found'", "Install libcublas-dev-13-2 (minimal-build doesn't pull it in)"],
+        ["nvcc not found", "Add /usr/local/cuda-13.2/bin to PATH (and a profile.d entry)"],
+        ["MAXN_SUPER resets on boot", "Edit the board conf nvpmodel_p3767_0003.conf (DEFAULT 2), not the /etc symlink"],
+        ["OOM / killed processes", "Lower --ctx-size, keep 16GB swap, don't add a 3rd model"],
+        ["Port already in use on restart", "Free it via 'sudo fuser -k 8080/tcp'; avoid 'pkill -f llama-server' (matches your own ssh)"],
+        ["Docker CUDA image fails on JP7", "Use the native build; if you must use Docker see the appendix (nvgpu LD_LIBRARY_PATH)"],
     ],
     headers=["Symptom", "Fix"],
     widths=[70, 108],
 )
 
-# ================= 17. APPENDIX =================
-h1("Appendix - Version Pin Table")
+# ================= 13. APPENDIX =================
+h1("Appendix A - Version Pin Table")
 body("Mirror of versions.env. Update deliberately; verify on-device before bumping.")
 kv_table(
     rows=[
         ["JetPack", "7.2"],
         ["L4T", "r39.2"],
-        ["llama.cpp image", "dustynv/llama_cpp:r39.2.0 (verify tag)"],
-        ["Open WebUI", "ghcr.io/open-webui/open-webui:main"],
-        ["Wyoming Whisper", "rhasspy/wyoming-whisper"],
-        ["Wyoming Piper", "rhasspy/wyoming-piper"],
-        ["Node", "24"],
-        ["OpenClaw", "pin once chosen"],
-        ["Cloud model", "github-copilot/claude-opus-4.8"],
-        ["Local model", "llamacpp/gemma-3-4b (Q4)"],
+        ["CUDA toolkit / driver", "13.2 (sm_87 / compute 8.7)"],
+        ["LLM engine", "llama.cpp (native, pin commit)"],
+        ["LLM model", "Qwen3-8B-Q4_K_M.gguf"],
+        ["STT engine", "whisper.cpp (native, pin commit)"],
+        ["STT model", "ggml-large-v3-turbo-q5_0.bin"],
+        ["TTS (off-Jetson)", "Piper (mini-PC / HA)"],
+        ["Agent harness (off-Jetson)", "OpenClaw (mini-PC)"],
     ],
     headers=["Item", "Pinned value"],
     widths=[80, 98],
 )
+h1("Appendix B - Docker fallback on JetPack 7 (if ever needed)")
+body("Native is the recommended path. If you must run a JP6 (r36.4) CUDA container on the JP7 host, the GPU only initialises when you force it to use the nvgpu libcuda; the default/openrm variant reports 'no CUDA-capable device'.")
+code([
+    "# inside / for the container, point the loader at the nvgpu libs:",
+    "LD_LIBRARY_PATH=/opt/nvidia/l4t-gpu-libs/nvgpu  <cuda-program>",
+    "# Note: older engine builds may not know newer architectures",
+    "# (e.g. r36.4.0 llama.cpp errors 'unknown model architecture: qwen3').",
+])
 
 out_dir = os.path.join(os.path.dirname(__file__), "..", "docs")
 os.makedirs(out_dir, exist_ok=True)

@@ -1,0 +1,17 @@
+[Unit]
+Description=llama.cpp server (Qwen3-8B, CUDA) — LLM inference on :8080
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lex
+Environment=PATH=/usr/local/cuda-13.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64
+ExecStart=/opt/llama.cpp/build/bin/llama-server -m /opt/models/Qwen3-8B-Q4_K_M.gguf -ngl 99 -c 8192 -fa on --cache-type-k q8_0 --cache-type-v q8_0 --host 0.0.0.0 --port 8080 --alias qwen3-8b
+Restart=on-failure
+RestartSec=5
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

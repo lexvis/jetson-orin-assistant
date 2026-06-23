@@ -1,0 +1,17 @@
+[Unit]
+Description=whisper.cpp server (large-v3-turbo, CUDA) — STT inference on :8081
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lex
+Environment=PATH=/usr/local/cuda-13.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64
+ExecStart=/opt/whisper.cpp/build/bin/whisper-server -m /opt/models/ggml-large-v3-turbo-q5_0.bin -l auto -t 4 --host 0.0.0.0 --port 8081
+Restart=on-failure
+RestartSec=5
+Nice=0
+
+[Install]
+WantedBy=multi-user.target
