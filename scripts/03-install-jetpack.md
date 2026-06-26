@@ -44,8 +44,56 @@ ssh <user>@<jetson-ip>      # find the IP in the top bar or your router
 ## Verify
 ```bash
 lsblk            # root (/) should be on nvme0n1p1
-nvpmodel -q      # MAXN SUPER
+nvpmodel -q      # MAXN_SUPER
+cat /proc/device-tree/model                 # ...Developer Kit Super
+grep COMPATIBLE_SPEC /etc/nv_boot_control.conf   # must end in ...devkit-super-
 ```
 
 > If your dev kit shipped with factory firmware too old for JetPack 7, run
 > NVIDIA's "JetPack 6.x update path" once, then retry the JP7 installer.
+
+## Fix: MAXN_SUPER missing / GPU stuck at 624 MHz (known JP7.2 ISO bug)
+
+**Symptom.** Only 7W/15W power modes are offered, or `nvpmodel -q` reports
+`MAXN_SUPER` yet the GPU never exceeds **624.75 MHz** and EMC stays at **2133 MHz**
+(~68 GB/s). `/proc/device-tree/model` reads "Developer Kit" without "Super", and
+`/etc/nv_boot_control.conf` `COMPATIBLE_SPEC` ends in `...jetson-orin-nano-devkit-`
+(no `-super`).
+
+**Cause.** The JetPack 7.2 *Jetson-ISO* installer provisions the **non-super device
+tree**, so the BPMP firmware OPP tables omit the higher Super frequencies. nvpmodel
+can only select *within* that table, so MAXN_SUPER is cosmetic. This is a confirmed
+NVIDIA bug (forum topic 372627; NVIDIA staff: *"the ISO image cannot upgrade a
+device from non-Super Mode to Super Mode"*).
+
+**On-device fix (no x86 host, ~4 min + 1 reboot).** Back up first, then:
+```bash
+sudo cp /etc/nv_boot_control.conf /root/nv_boot_control.conf.bak
+sudo -i
+# 1. flag the board as the Super variant (rewrites both TNSPEC + COMPATIBLE_SPEC)
+perl -i -0777 -pe 's/nano-devkit-\n/nano-devkit-super-\n/g' /etc/nv_boot_control.conf
+# 2. reflash the QSPI bootloader/BPMP firmware from the installed BSP (super OPPs)
+dpkg-reconfigure nvidia-l4t-bootloader
+# 3. drop the wrong nvpmodel symlink; it regenerates to the _super conf on boot
+rm /etc/nvpmodel.conf
+reboot
+```
+After reboot:
+```bash
+sudo nvpmodel -m 2 --verbose --force        # 0/1/2 = 15W / 25W / MAXN_SUPER
+```
+
+**Verify the fix worked:**
+```bash
+grep COMPATIBLE_SPEC /etc/nv_boot_control.conf      # ...devkit-super-
+cat /proc/device-tree/model                          # ...Developer Kit Super
+cat /sys/devices/platform/bus@0/*.gpu/devfreq/*/available_frequencies | tr ' ' '\n' | tail -1   # 1020000000
+cat /sys/kernel/debug/bpmp/debug/clk/emc/max_rate    # 3199000000
+```
+Expected gain: GPU 624.75 -> **1020 MHz**, EMC 2133 -> **3199 MHz** (~102 GB/s),
+Qwen3-8B Q4 throughput ~7.3 -> **~11.6 tok/s**. MAXN_SUPER uses DVFS, so clocks
+scale up only under load and idle back down (no need to pin `jetson_clocks`).
+
+> Fallback if the in-place fix doesn't fully apply (e.g. EMC still 2133 MHz):
+> reflash from an x86 Ubuntu host with
+> `sudo ./l4t_initrd_flash.sh --erase-all jetson-orin-nano-devkit-super internal`.

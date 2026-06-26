@@ -224,7 +224,7 @@ callout("Why native, not Docker (JetPack 7 reality)",
 h1("2. Hardware Checklist & Memory Budget")
 h2("Hardware")
 bullets([
-    "Jetson Orin Nano 8GB Developer Kit (Super-capable; JetPack 7.2 / L4T r39.2, board p3767-0003).",
+    "Jetson Orin Nano 8GB Developer Kit (Super; JetPack 7.2 / L4T r39.2, module p3767-0005, carrier p3768).",
     "NVMe M.2 SSD 500GB (PCIe Gen3) installed in the M.2 Key-M slot - becomes the root filesystem.",
     "USB stick (>=16GB) for the one-time JetPack installer (throwaway boot media).",
     "DisplayPort monitor + USB keyboard for the one-time install (no video over USB-C); headless via SSH afterwards.",
@@ -275,16 +275,19 @@ code([
     "sudo apt purge -y ubuntu-desktop gnome-shell gdm3 yaru-theme-*",
     "sudo apt autoremove --purge -y && sudo apt clean  # frees several GB",
 ])
-h2("Power mode: MAXN SUPER, made persistent")
-body("nvpmodel sets a persistent power CEILING; jetson_clocks merely PINS max clocks (disables DVFS) and is deliberately non-persistent. We want the high ceiling but keep DVFS on so the GPU idles down and saves energy.")
+h2("Power mode: unlock real MAXN SUPER clocks (JP7.2 ISO gotcha)")
+body("CRITICAL on JetPack 7.2: the Jetson-ISO installer provisions the NON-super device tree, so even with nvpmodel reporting MAXN_SUPER the GPU is capped at 624.75 MHz and EMC at 2133 MHz (~68 GB/s). Confirmed NVIDIA bug (forum topic 372627). Check '/proc/device-tree/model' (must say 'Super') and 'grep COMPATIBLE_SPEC /etc/nv_boot_control.conf' (must end '...devkit-super-'). If not, apply the in-place fix below - no x86 host needed.")
 code([
-    "sudo nvpmodel -m 2        # MAXN SUPER (mode 2 on p3767-0003 super conf)",
-    "# Persistence gotcha: symlinking /etc/nvpmodel.conf is reset on boot.",
-    "# Make MAXN_SUPER the board default by editing the board conf itself:",
-    "#   /etc/nvpmodel/nvpmodel_p3767_0003.conf -> set 'DEFAULT 2'",
-    "# (back up the original as .orig first). Do NOT enable a jetson_clocks",
-    "# service - leave DVFS (governor schedutil) on to save energy.",
+    "sudo cp /etc/nv_boot_control.conf /root/nv_boot_control.conf.bak",
+    "sudo perl -i -0777 -pe 's/nano-devkit-\\n/nano-devkit-super-\\n/g' \\",
+    "  /etc/nv_boot_control.conf      # flag board as the Super variant",
+    "sudo dpkg-reconfigure nvidia-l4t-bootloader   # reflash super BPMP fw",
+    "sudo rm /etc/nvpmodel.conf        # regenerates to the _super conf",
+    "sudo reboot",
+    "# after reboot:",
+    "sudo nvpmodel -m 2 --verbose --force   # 0/1/2 = 15W / 25W / MAXN_SUPER",
 ])
+body("Verify: GPU available_frequencies now tops at 1020000000 and emc/max_rate is 3199000000. nvpmodel sets a persistent power CEILING; do NOT pin jetson_clocks - leave DVFS (schedutil) on so the GPU idles down and saves energy while still bursting to 1020 MHz under load.")
 h2("Disable non-essential services")
 body("Audit with 'systemctl list-unit-files --state=enabled' and 'systemd-analyze blame'. On a headless inference node you can safely disable, e.g.: bluetooth, ModemManager, avahi-daemon, cups/lpd, kerneloops, apport, gnome-remote-desktop, switcheroo-control, power-profiles-daemon, accounts-daemon, isc-dhcp-server, dnsmasq, openvpn, sssd, ubuntu-advantage, anacron, fwupd, nvargus-daemon (cameras), udisks2, and the host audio stack (pipewire/wireplumber). Mask snapd and disable cloud-init if unused.")
 h2("Swap on NVMe (OOM safety net)")
@@ -341,7 +344,7 @@ code([
     "curl http://127.0.0.1:8080/v1/models       # health check",
 ])
 callout("Expected performance",
-        "On the Orin Nano Super, Qwen3-8B Q4 generates ~7.5-9 tok/s. Token generation is memory-bandwidth bound (~102 GB/s / ~4.8GB model ~= 21 tok/s theoretical ceiling, ~40-60% realised). This is normal and comfortably faster than reading speed for an assistant.",
+        "With real Super clocks unlocked (see Phase 2), Qwen3-8B Q4 generates ~11.6 tok/s (vs ~7.3 tok/s while still capped at 624 MHz - a ~58% gain). Token generation is memory-bandwidth bound (~102 GB/s / ~4.8GB model ~= 21 tok/s theoretical ceiling, ~55% realised). This is normal and comfortably faster than reading speed for an assistant.",
         SECBG)
 
 # ================= 7. STT =================
@@ -445,7 +448,7 @@ kv_table(
         ["NVMe won't boot after install", "Re-run the USB installer; ensure you pressed Y for the firmware capsule; check UEFI Boot Manager"],
         ["CMake: 'CUDA::cublas not found'", "Install libcublas-dev-13-2 (minimal-build doesn't pull it in)"],
         ["nvcc not found", "Add /usr/local/cuda-13.2/bin to PATH (and a profile.d entry)"],
-        ["MAXN_SUPER resets on boot", "Edit the board conf nvpmodel_p3767_0003.conf (DEFAULT 2), not the /etc symlink"],
+        ["MAXN_SUPER set but GPU stuck at 624 MHz / EMC 2133", "JP7.2 ISO flashed the non-super device tree. Fix in-place: add '-super' to /etc/nv_boot_control.conf, 'dpkg-reconfigure nvidia-l4t-bootloader', rm /etc/nvpmodel.conf, reboot (see Phase 2)"],
         ["OOM / killed processes", "Lower --ctx-size, keep 16GB swap, don't add a 3rd model"],
         ["Port already in use on restart", "Free it via 'sudo fuser -k 8080/tcp'; avoid 'pkill -f llama-server' (matches your own ssh)"],
         ["Docker CUDA image fails on JP7", "Use the native build; if you must use Docker see the appendix (nvgpu LD_LIBRARY_PATH)"],
